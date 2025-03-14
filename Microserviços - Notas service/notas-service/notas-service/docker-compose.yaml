@@ -1,0 +1,22 @@
+version: '3'
+services:
+  db1:
+    image: postgres:latest
+    environment:
+      POSTGRES_DB: notas_db
+      POSTGRES_USER: usuario
+      POSTGRES_PASSWORD: senha
+    ports:
+      - "5432:5432"
+    networks:
+      - net
+  adminer:
+    image: adminer:latest
+    ports:
+      - "8081:80"
+    networks:
+      - net
+
+networks:
+  net:
+    driver: bridge

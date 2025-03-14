@@ -1,0 +1,223 @@
+// ========================
+// 🎓 SERVIÇO DE NOTAS (Cadastro de Notas)
+// ========================
+
+// 📌 Objeto de Valor
+package com.example.nota.dominio;
+
+import jakarta.persistence.Embeddable;
+import lombok.*;
+
+@Embeddable
+@Getter @Setter
+@NoArgsConstructor @AllArgsConstructor
+public class Nota {
+    private double valor;
+    public boolean isAprovado() {
+        return valor >= 6.0;
+    }
+}
+
+// 📌 Raiz de Agregado
+@Entity
+@Getter @Setter
+@NoArgsConstructor @AllArgsConstructor
+@Table(name = "notas")
+public class LancamentoNota {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String nomeAluno;
+    @Embedded
+    private Nota nota;
+}
+
+// 📌 Repositório
+package com.example.nota.infraestrutura.repositorio;
+
+import com.example.nota.dominio.LancamentoNota;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface NotaRepositorio extends JpaRepository<LancamentoNota, Long> {}
+
+// 📌 Serviço
+package com.example.nota.aplicacao;
+
+import com.example.nota.dominio.LancamentoNota;
+import com.example.nota.infraestrutura.repositorio.NotaRepositorio;
+import lombok.RequiredArgsConstructor;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Service;
+
+@Service
+@RequiredArgsConstructor
+public class NotaServico {
+    private final NotaRepositorio repositorio;
+    private final KafkaTemplate<String, LancamentoNota> kafkaTemplate;
+
+    public LancamentoNota salvarNota(LancamentoNota nota) {
+        LancamentoNota salva = repositorio.save(nota);
+        kafkaTemplate.send("notas", salva); // Envia para Kafka
+        return salva;
+    }
+}
+
+// 📌 Controlador
+package com.example.nota.infraestrutura.controlador;
+
+import com.example.nota.aplicacao.NotaServico;
+import com.example.nota.dominio.LancamentoNota;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/notas")
+@RequiredArgsConstructor
+public class NotaControlador {
+    private final NotaServico servico;
+
+    @PostMapping
+    public LancamentoNota adicionarNota(@RequestBody LancamentoNota nota) {
+        return servico.salvarNota(nota);
+    }
+
+    @GetMapping
+    public List<LancamentoNota> obterTodasNotas() {
+        return servico.getAllNotas();
+    }
+}
+
+// ========================
+// 📊 SERVIÇO DE AVALIAÇÃO (Avaliação de Notas)
+// ========================
+
+// 📌 Objeto de Valor
+package com.example.avaliacao.dominio;
+
+import lombok.*;
+
+@Getter @Setter
+@NoArgsConstructor @AllArgsConstructor
+public class ResultadoAvaliacao {
+    private String nomeAluno;
+    private double nota;
+    private String status;
+}
+
+// 📌 Serviço de Avaliação
+package com.example.avaliacao.aplicacao;
+
+import com.example.avaliacao.dominio.ResultadoAvaliacao;
+import com.example.nota.dominio.LancamentoNota;
+import lombok.RequiredArgsConstructor;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Service;
+
+@Service
+@RequiredArgsConstructor
+public class AvaliacaoServico {
+    private final KafkaTemplate<String, ResultadoAvaliacao> kafkaTemplate;
+
+    @KafkaListener(topics = "notas", groupId = "grupo-avaliacao")
+    public void avaliarNota(LancamentoNota nota) {
+        String resultado = nota.getNota().isAprovado() ? "Aprovado" : "Reprovado";
+        ResultadoAvaliacao avaliacao = new ResultadoAvaliacao(nota.getNomeAluno(), nota.getNota().getValor(), resultado);
+        kafkaTemplate.send("avaliacoes", avaliacao);
+    }
+}
+
+// ========================
+// 🎨 FRONTEND (Thymeleaf)
+// ========================
+
+// 📌 HTML (index.html)
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Lançamento de Notas</title>
+</head>
+<body>
+    <h1>Lançamento de Notas</h1>
+    <form action="/notas" method="post">
+        Nome: <input type="text" name="nomeAluno" required>
+        Nota: <input type="number" step="0.1" name="nota.valor" required>
+        <button type="submit">Salvar</button>
+    </form>
+</body>
+</html>
+
+// ========================
+// 🏗 INFRA (Docker + K3s + Rancher)
+// ========================
+
+// 📌 Dockerfile (para cada microserviço)
+FROM openjdk:17-jdk-slim
+WORKDIR /app
+COPY target/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
+
+// 📌 docker-compose.yml
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: usuario
+      POSTGRES_PASSWORD: senha
+      POSTGRES_DB: notas_db
+    ports:
+      - "5432:5432"
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+    ports:
+      - "9092:9092"
+  servico-notas:
+    build: ./servico-notas
+    depends_on:
+      - postgres
+      - kafka
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/notas_db
+  servico-avaliacao:
+    build: ./servico-avaliacao
+    depends_on:
+      - kafka
+
+// 📌 Kubernetes Deployment (k3s)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: servico-notas
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: servico-notas
+  template:
+    metadata:
+      labels:
+        app: servico-notas
+    spec:
+      containers:
+      - name: servico-notas
+        image: servico-notas:latest
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: servico-notas
+spec:
+  selector:
+    app: servico-notas
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080
