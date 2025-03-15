@@ -15,6 +15,7 @@ public class NotasService {
     //private final KafkaTemplate<String, LancamentoNota> kafkaTemplate;
 
     public LancamentoNota salvarNota(LancamentoNota nota) {
+        nota.getNota().atribuirConceito();
         LancamentoNota salva = repositorio.save(nota);
         //kafkaTemplate.send("notas", salva); // Envia para Kafka
         return salva;
