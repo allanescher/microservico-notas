@@ -9,11 +9,6 @@
         <option value="$PROJECT_DIR$/Microserviços - Notas service/notas-service/pom.xml" />
       </list>
     </option>
-    <option name="ignoredFiles">
-      <set>
-        <option value="$PROJECT_DIR$/Microserviços - Notas service/avaliacao-service/avaliacao-service/pom.xml" />
-      </set>
-    </option>
   </component>
   <component name="ProjectRootManager" version="2" project-jdk-name="17" project-jdk-type="JavaSDK" />
 </project>
